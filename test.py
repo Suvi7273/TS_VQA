@@ -6,57 +6,80 @@ from torch.utils.data import DataLoader, Dataset
 from backbone import VimTSFeatureExtraction
 from loss import VimTSLoss
 
+# class MinimalVimTSModel(nn.Module):
+#     """Minimal VimTS model for testing Modules 1 & 7"""
+#     def __init__(self, num_classes=2, vocab_size=100, max_text_len=25, num_queries=100):
+#         super().__init__()
+        
+#         # Your Module 1: Feature Extraction
+#         self.feature_extractor = VimTSFeatureExtraction(pretrained=True)
+        
+#         # Minimal query generation for testing
+#         self.num_queries = num_queries
+#         self.query_embed = nn.Embedding(num_queries, 256)
+        
+#         # Minimal prediction heads
+#         self.class_head = nn.Linear(256, num_classes + 1)  # +1 for background
+#         self.bbox_head = nn.Linear(256, 4)
+#         self.polygon_head = nn.Linear(256, 16)  # 8 points * 2 coords
+#         self.text_head = nn.Linear(256, max_text_len * vocab_size)
+        
+#         self.max_text_len = max_text_len
+#         self.vocab_size = vocab_size
+        
+#     def forward(self, images):
+#         batch_size = images.shape[0]
+        
+#         # Module 1: Feature extraction
+#         features = self.feature_extractor(images)  # [B, 256, H', W']
+        
+#         # Simple query processing for testing
+#         queries = self.query_embed.weight.unsqueeze(0).expand(batch_size, -1, -1)  # [B, num_queries, 256]
+        
+#         # Global average pooling of features for simplicity
+#         pooled_features = features.mean(dim=[2, 3])  # [B, 256]
+        
+#         # Add pooled features to queries (simplified attention)
+#         enhanced_queries = queries + pooled_features.unsqueeze(1)  # [B, num_queries, 256]
+        
+#         # Prediction heads
+#         pred_logits = self.class_head(enhanced_queries)  # [B, num_queries, num_classes+1]
+#         pred_boxes = self.bbox_head(enhanced_queries).sigmoid() * 640  # [B, num_queries, 4]
+#         pred_polygons = self.polygon_head(enhanced_queries).sigmoid() * 640  # [B, num_queries, 16]
+        
+#         # Text predictions
+#         text_logits = self.text_head(enhanced_queries)  # [B, num_queries, max_len*vocab]
+#         pred_texts = text_logits.view(batch_size, self.num_queries, self.max_text_len, self.vocab_size)
+        
+#         return {
+#             'pred_logits': pred_logits,
+#             'pred_boxes': pred_boxes,
+#             'pred_polygons': pred_polygons,
+#             'pred_texts': pred_texts
+#         }
+# In test.py - Replace MinimalVimTSModel class
+from queryInitialization import VimTSWithQueryInit
+
 class MinimalVimTSModel(nn.Module):
-    """Minimal VimTS model for testing Modules 1 & 7"""
-    def __init__(self, num_classes=2, vocab_size=100, max_text_len=25, num_queries=100):
+    """Minimal VimTS model for testing Modules 1, 2 & 7"""
+    def __init__(self, num_classes=2, vocab_size=100, max_text_len=25, num_queries=125):
         super().__init__()
         
-        # Your Module 1: Feature Extraction
-        self.feature_extractor = VimTSFeatureExtraction(pretrained=True)
+        # Use the corrected VimTS model with Query Initialization
+        self.vimts_model = VimTSWithQueryInit(
+            num_classes=num_classes,
+            vocab_size=vocab_size, 
+            max_text_len=max_text_len
+        )
         
-        # Minimal query generation for testing
-        self.num_queries = num_queries
-        self.query_embed = nn.Embedding(num_queries, 256)
-        
-        # Minimal prediction heads
-        self.class_head = nn.Linear(256, num_classes + 1)  # +1 for background
-        self.bbox_head = nn.Linear(256, 4)
-        self.polygon_head = nn.Linear(256, 16)  # 8 points * 2 coords
-        self.text_head = nn.Linear(256, max_text_len * vocab_size)
-        
+        # Store parameters for compatibility
         self.max_text_len = max_text_len
         self.vocab_size = vocab_size
-        
+    
     def forward(self, images):
-        batch_size = images.shape[0]
-        
-        # Module 1: Feature extraction
-        features = self.feature_extractor(images)  # [B, 256, H', W']
-        
-        # Simple query processing for testing
-        queries = self.query_embed.weight.unsqueeze(0).expand(batch_size, -1, -1)  # [B, num_queries, 256]
-        
-        # Global average pooling of features for simplicity
-        pooled_features = features.mean(dim=[2, 3])  # [B, 256]
-        
-        # Add pooled features to queries (simplified attention)
-        enhanced_queries = queries + pooled_features.unsqueeze(1)  # [B, num_queries, 256]
-        
-        # Prediction heads
-        pred_logits = self.class_head(enhanced_queries)  # [B, num_queries, num_classes+1]
-        pred_boxes = self.bbox_head(enhanced_queries).sigmoid() * 640  # [B, num_queries, 4]
-        pred_polygons = self.polygon_head(enhanced_queries).sigmoid() * 640  # [B, num_queries, 16]
-        
-        # Text predictions
-        text_logits = self.text_head(enhanced_queries)  # [B, num_queries, max_len*vocab]
-        pred_texts = text_logits.view(batch_size, self.num_queries, self.max_text_len, self.vocab_size)
-        
-        return {
-            'pred_logits': pred_logits,
-            'pred_boxes': pred_boxes,
-            'pred_polygons': pred_polygons,
-            'pred_texts': pred_texts
-        }
+        # Forward through VimTS with Query Initialization
+        return self.vimts_model(images)
+
 
 import os
 import json
@@ -186,21 +209,20 @@ def create_real_dataloader(dataset_path):
     return train_loader
 
 
-def dry_run_test(dataset_path):
-    """Main dry run testing function"""
+def dry_run_test_with_module2(dataset_path):
+    """Complete dry run test with Module 1 + Module 2 + Module 7"""
+    print("🚀 Starting VimTS Dry Run Test with Module 2...")
     
-    print(" Starting VimTS Dry Run Test with REAL dataset...")
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-    model = MinimalVimTSModel().to(device)
-    criterion = VimTSLoss()
-
-    # dataset_path = r"G:\sample"
+    print(f"📱 Using device: {device}")
+    
+    model = MinimalVimTSModel().to(device)  # Uses corrected VimTSWithQueryInit
+    criterion = VimTSLoss()  # Your corrected loss function
+    
     # Use real dataloader
     dataloader = create_real_dataloader(dataset_path)
-
-    model.eval()
     
+    model.eval()
     for batch_idx, (images, targets) in enumerate(dataloader):
         images = images.to(device)
         targets = [{k: v.to(device) for k, v in target.items()} for target in targets]
@@ -217,24 +239,34 @@ def dry_run_test(dataset_path):
             print(f"   Pred polygons shape: {predictions['pred_polygons'].shape}")
             print(f"   Pred texts shape: {predictions['pred_texts'].shape}")
             
+            # Check if coarse predictions exist (from Module 2)
+            if 'coarse_predictions' in predictions:
+                coarse_preds = predictions['coarse_predictions']
+                print(f"   ✅ Coarse class logits: {coarse_preds['coarse_class_logits'].shape}")
+                print(f"   ✅ Coarse bbox pred: {coarse_preds['coarse_bbox_pred'].shape}")
+                print("   ✅ Module 2 (Query Initialization) working!")
+            
             # Test loss computation
             model.train()
             predictions = model(images)
             loss, loss_dict = criterion(predictions, targets)
             
-            print(f"   Loss computation: ✅")
-            print(f"   Total loss: {loss.item():.4f}")
-            print(f"   Loss breakdown: {loss_dict}")
+            print(f"    Loss computation: SUCCESS!")
+            print(f"    Total loss: {loss.item():.4f}")
+            print(f"    Loss breakdown:")
+            for key, value in loss_dict.items():
+                if isinstance(value, torch.Tensor):
+                    print(f"       {key}: {value.item():.4f}")
             
         except Exception as e:
             print(f"❌ Error in batch {batch_idx + 1}: {str(e)}")
             import traceback
             traceback.print_exc()
             return False
-        
     
-    print("🎉 Dry run completed successfully!")
+    print("\n🎉 Complete test with Module 2 passed!")
     return True
+
 
 def collate_fn(batch):
     images, targets = zip(*batch)
@@ -316,4 +348,5 @@ if __name__ == "__main__":
         print(" Ready to implement Module 2: Query Initialization")
     else:
         print("\n Tests failed. Please fix the issues before proceeding.")
+
 

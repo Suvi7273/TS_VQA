@@ -306,7 +306,7 @@ def test_gradient_flow():
         return False
 
 if __name__ == "__main__":
-    dataset_path = r"G:/"  # update this
+    dataset_path = r"/content/drive/MyDrive"  # update this
     success = dry_run_test(dataset_path)
     if success:
         success = test_gradient_flow()
@@ -316,3 +316,4 @@ if __name__ == "__main__":
         print(" Ready to implement Module 2: Query Initialization")
     else:
         print("\n Tests failed. Please fix the issues before proceeding.")
+

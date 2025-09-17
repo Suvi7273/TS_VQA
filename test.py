@@ -209,7 +209,7 @@ def create_real_dataloader(dataset_path):
     return train_loader
 
 
-def dry_run_test_with_module2(dataset_path):
+def dry_run_test(dataset_path):
     """Complete dry run test with Module 1 + Module 2 + Module 7"""
     print("🚀 Starting VimTS Dry Run Test with Module 2...")
     
@@ -348,5 +348,6 @@ if __name__ == "__main__":
         print(" Ready to implement Module 2: Query Initialization")
     else:
         print("\n Tests failed. Please fix the issues before proceeding.")
+
 
 

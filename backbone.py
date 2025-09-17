@@ -110,7 +110,7 @@ class FeatureTransformerEncoder(nn.Module):
         multi_scale_features = self.channel_reduction(multi_scale_features)
         
         # Add positional encoding
-        B, C, H, W = multi_scale_features.shape[0]
+        B, C, H, W = multi_scale_features.shape
         pos_embed = F.interpolate(self.pos_embed, size=(H, W), mode='bilinear', align_corners=False)
         multi_scale_features = multi_scale_features + pos_embed
         
@@ -157,3 +157,4 @@ class VimTSFeatureExtraction(nn.Module):
         enhanced_features = self.transformer_encoder(resnet_features, rem_features)
         
         return enhanced_features
+

@@ -1,4 +1,4 @@
-# VimTS Module 5: Task-Aware Adapter
+# FIXED Module 5: Task-Aware Adapter - Tensor Shape Issue Resolved
 
 import torch
 import torch.nn as nn
@@ -98,7 +98,7 @@ class AdapterLayer(nn.Module):
 
 class TaskSpecificHead(nn.Module):
     """
-    Task-specific prediction heads with adapters
+    Task-specific prediction heads with adapters - FIXED DIMENSIONS
     """
     def __init__(self, d_model=256, task_dim=None, adapter_dim=64, use_lora=True):
         super(TaskSpecificHead, self).__init__()
@@ -233,7 +233,7 @@ class MultiTaskAdapter(nn.Module):
 
 class TaskAwareAdapter(nn.Module):
     """
-    Complete Module 5: Task-Aware Adapter
+    Complete Module 5: Task-Aware Adapter - FIXED TENSOR DIMENSIONS
     Provides parameter-efficient fine-tuning capabilities
     """
     def __init__(self, 
@@ -259,7 +259,10 @@ class TaskAwareAdapter(nn.Module):
         self.classification_head = TaskSpecificHead(d_model, 3, adapter_dim, use_lora)  # 3 classes
         self.bbox_head = TaskSpecificHead(d_model, 4, adapter_dim, use_lora)  # 4 bbox coords
         self.polygon_head = TaskSpecificHead(d_model, 16, adapter_dim, use_lora)  # 16 polygon points
-        self.text_head = TaskSpecificHead(d_model, 512, adapter_dim, use_lora)  # text features
+        
+        # 🔥 FIXED: Text head with correct dimensions
+        # Calculate correct text output dimension
+        self.text_head = TaskSpecificHead(d_model, 2500, adapter_dim, use_lora)  # 25 * 100 = 2500
         
         # Adapter control
         self.adapter_enabled = True
@@ -296,7 +299,7 @@ class TaskAwareAdapter(nn.Module):
     
     def get_task_specific_predictions(self, adapted_queries, max_text_len=25, vocab_size=100):
         """
-        Generate task-specific predictions using adapter-enhanced heads
+        Generate task-specific predictions using adapter-enhanced heads - FIXED DIMENSIONS
         
         Args:
             adapted_queries: [B, N, d_model] adapter-enhanced queries
@@ -306,16 +309,18 @@ class TaskAwareAdapter(nn.Module):
         Returns:
             predictions: dict with task-specific predictions
         """
-        batch_size = adapted_queries.shape[0]
+        batch_size, num_queries, _ = adapted_queries.shape
         
         # Task-specific predictions
         pred_logits = self.classification_head(adapted_queries, use_adapter=self.adapter_enabled)
         pred_boxes = self.bbox_head(adapted_queries, use_adapter=self.adapter_enabled).sigmoid()
         pred_polygons = self.polygon_head(adapted_queries, use_adapter=self.adapter_enabled).sigmoid()
         
-        # Text predictions (reshape to proper dimensions)
-        text_features = self.text_head(adapted_queries, use_adapter=self.adapter_enabled)
-        text_logits = text_features.view(batch_size, -1, max_text_len, vocab_size)
+        # 🔥 FIXED: Text predictions with correct reshaping
+        text_features = self.text_head(adapted_queries, use_adapter=self.adapter_enabled)  # [B, N, 2500]
+        
+        # Reshape correctly: [B, N, 2500] -> [B, N, 25, 100]
+        text_logits = text_features.view(batch_size, num_queries, max_text_len, vocab_size)
         
         return {
             'pred_logits': pred_logits,

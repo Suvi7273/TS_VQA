@@ -1,11 +1,12 @@
+# VimTS Module 2: Query Initialization - CORRECTED VERSION
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from backbone import VimTSFeatureExtraction
 
 class QueryInitialization(nn.Module):
     """
-    Module 2: Query Initialization
+    Module 2: Query Initialization - CORRECTED VERSION
     Generates detection and recognition queries from enhanced features
     """
     def __init__(self, 
@@ -106,7 +107,7 @@ class QueryInitialization(nn.Module):
     
     def _generate_detection_queries(self, features, class_logits, bbox_pred):
         """Generate detection queries based on coarse predictions"""
-        batch_size = features.shape
+        batch_size = features.shape[0]  # 🔥 FIX: Add [0] to get integer
         
         # Get confidence scores for text regions
         text_confidence = F.softmax(class_logits, dim=-1)[..., 1]  # [B, H*W]
@@ -117,6 +118,7 @@ class QueryInitialization(nn.Module):
         for b in range(batch_size):
             confidence_b = text_confidence[b]  # [H*W]
             features_b = features[b]  # [H*W, C]
+            device = features_b.device  # 🔥 FIX: Get device for consistency
             
             # Select top-N locations
             if confidence_b.numel() >= self.num_detection_queries:
@@ -126,12 +128,15 @@ class QueryInitialization(nn.Module):
                     largest=True
                 )
             else:
-                # If not enough locations, pad with random selections
-                top_indices = torch.randperm(confidence_b.numel())[:self.num_detection_queries]
+                # 🔥 FIX: Ensure all tensors are on same device
+                num_available = confidence_b.numel()
+                top_indices = torch.randperm(num_available, device=device)[:self.num_detection_queries]
+                
                 if len(top_indices) < self.num_detection_queries:
                     padding_indices = torch.randint(
-                        0, confidence_b.numel(), 
-                        (self.num_detection_queries - len(top_indices),)
+                        0, num_available, 
+                        (self.num_detection_queries - len(top_indices),),
+                        device=device  # 🔥 FIX: Add device parameter
                     )
                     top_indices = torch.cat([top_indices, padding_indices])
             
@@ -152,7 +157,7 @@ class QueryInitialization(nn.Module):
     
     def _generate_recognition_queries(self, features, class_logits):
         """Generate recognition queries for character/word recognition"""
-        batch_size = features.shape
+        batch_size = features.shape[0]  # 🔥 FIX: Add [0] to get integer
         
         # Similar to detection queries but for recognition
         text_confidence = F.softmax(class_logits, dim=-1)[..., 1]  # [B, H*W]
@@ -162,6 +167,7 @@ class QueryInitialization(nn.Module):
         for b in range(batch_size):
             confidence_b = text_confidence[b]
             features_b = features[b]
+            device = features_b.device  # 🔥 FIX: Get device for consistency
             
             # Select top locations for recognition
             if confidence_b.numel() >= self.num_recognition_queries:
@@ -171,11 +177,15 @@ class QueryInitialization(nn.Module):
                     largest=True
                 )
             else:
-                top_indices = torch.randperm(confidence_b.numel())[:self.num_recognition_queries]
+                # 🔥 FIX: Ensure device consistency
+                num_available = confidence_b.numel()
+                top_indices = torch.randperm(num_available, device=device)[:self.num_recognition_queries]
+                
                 if len(top_indices) < self.num_recognition_queries:
                     padding_indices = torch.randint(
-                        0, confidence_b.numel(), 
-                        (self.num_recognition_queries - len(top_indices),)
+                        0, num_available, 
+                        (self.num_recognition_queries - len(top_indices),),
+                        device=device  # 🔥 FIX: Add device parameter
                     )
                     top_indices = torch.cat([top_indices, padding_indices])
             
@@ -193,13 +203,15 @@ class QueryInitialization(nn.Module):
         recognition_queries = torch.stack(recognition_queries_list, dim=0)  # [B, N_rec, C]
         return recognition_queries
 
-# Integration with your existing model
+
+# Integration with your existing model - CORRECTED VERSION
 class VimTSWithQueryInit(nn.Module):
-    """Updated VimTS model with Module 2"""
+    """Updated VimTS model with Module 2 - CORRECTED VERSION"""
     def __init__(self, num_classes=2, vocab_size=100, max_text_len=25):
         super().__init__()
         
         # Module 1: Feature Extraction (your existing implementation)
+        from backbone import VimTSFeatureExtraction  # 🔥 FIX: Import inside class
         self.feature_extractor = VimTSFeatureExtraction(pretrained=True)
         
         # Module 2: Query Initialization  
@@ -230,10 +242,14 @@ class VimTSWithQueryInit(nn.Module):
         # Combine queries for unified processing
         all_queries = torch.cat([detection_queries, recognition_queries], dim=1)  # [B, N_total, C]
         
+        # 🔥 FIX: Get image dimensions for proper scaling
+        _, _, img_h, img_w = images.shape
+        max_size = max(img_h, img_w)
+        
         # Prediction heads
         pred_logits = self.class_head(all_queries)
-        pred_boxes = self.bbox_head(all_queries).sigmoid() * 640
-        pred_polygons = self.polygon_head(all_queries).sigmoid() * 640
+        pred_boxes = self.bbox_head(all_queries).sigmoid() * max_size  # 🔥 FIX: Use actual image size
+        pred_polygons = self.polygon_head(all_queries).sigmoid() * max_size  # 🔥 FIX: Use actual image size
         
         text_logits = self.text_head(all_queries)
         pred_texts = text_logits.view(batch_size, -1, self.max_text_len, self.vocab_size)

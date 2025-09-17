@@ -4,6 +4,13 @@ import torch.nn.functional as F
 from scipy.optimize import linear_sum_assignment
 import numpy as np
 
+def box_cxcywh_to_xyxy(x):
+    # x: [..., 4]
+    cx, cy, w, h = x.unbind(-1)
+    b = [(cx - 0.5 * w), (cy - 0.5 * h),
+         (cx + 0.5 * w), (cy + 0.5 * h)]
+    return torch.stack(b, dim=-1)
+
 class VimTSLoss(nn.Module):
     """
     VimTS Loss Function with Hungarian Matching
@@ -97,9 +104,17 @@ class VimTSLoss(nn.Module):
             pred_probs = F.softmax(pred_logits, dim=-1)
             cost_class = -pred_probs[:, target_classes]  # [N, M]
             
-            # Bounding box cost (L1 + GIoU)
-            cost_bbox = torch.cdist(pred_boxes, target_boxes, p=1)  # [N, M]
-            cost_giou = -self.generalized_box_iou(pred_boxes, target_boxes)  # [N, M]
+            pred_boxes = predictions['pred_boxes'][i]    # [N, 4]
+            target_boxes = targets[i]['boxes']           # [M, 4]
+            
+            # Convert if boxes are cxcywh
+            pred_boxes_xyxy = box_cxcywh_to_xyxy(pred_boxes)
+            target_boxes_xyxy = box_cxcywh_to_xyxy(target_boxes)
+            
+            # Bounding box cost
+            cost_bbox = torch.cdist(pred_boxes_xyxy, target_boxes_xyxy, p=1)  # [N, M]
+            cost_giou = -self.generalized_box_iou(pred_boxes_xyxy, target_boxes_xyxy)  # [N, M]
+
             
             # Final cost matrix (Equation 2)
             C = (self.weight_class * cost_class + 
@@ -157,14 +172,19 @@ class VimTSLoss(nn.Module):
         src_boxes = torch.cat(src_boxes, dim=0)
         tgt_boxes = torch.cat(tgt_boxes, dim=0)
         
-        # L1 loss
+        # Convert if boxes are cxcywh
+        src_boxes_xyxy = box_cxcywh_to_xyxy(src_boxes)
+        tgt_boxes_xyxy = box_cxcywh_to_xyxy(tgt_boxes)
+        
+        # L1 loss (still in cxcywh space is common in DETR, keep original here)
         l1_loss = self.bbox_loss_fn(src_boxes, tgt_boxes).sum(dim=1)
         
-        # GIoU loss  
-        giou = self.generalized_box_iou(src_boxes, tgt_boxes)
+        # GIoU loss (must be in xyxy)
+        giou = self.generalized_box_iou(src_boxes_xyxy, tgt_boxes_xyxy)
         giou_loss = 1 - torch.diag(giou)
         
         return (l1_loss + self.weight_giou * giou_loss).mean()
+
     
     def polygon_loss(self, predictions, targets, indices):
         """L1 loss for polygon coordinates"""
@@ -254,3 +274,4 @@ class VimTSLoss(nn.Module):
         areai = whi[:, :, 0] * whi[:, :, 1]
         
         return iou - (areai - union) / areai
+

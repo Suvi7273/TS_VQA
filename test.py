@@ -1,18 +1,21 @@
-import torch
-import torch.nn as nn
-import numpy as np
-from torch.utils.data import DataLoader, Dataset
-
-from backbone import VimTSFeatureExtraction
-from loss import VimTSLoss
-
-from decoder import CompleteVimTSDecoder
-from queryInitialization import VimTSWithQueryInit
-# VimTS Complete Model with Module 3 Integration
+# CORRECTED test.py for VimTS Module 3 Integration
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import numpy as np
+from torch.utils.data import DataLoader, Dataset
+import os
+import json
+from PIL import Image
+
+# Correct imports for all modules
+from backbone import VimTSFeatureExtraction
+from loss import VimTSLoss
+
+# ========================================
+# VimTS Complete Model with Module 3
+# ========================================
 
 class VimTSCompleteModel(nn.Module):
     """
@@ -27,10 +30,9 @@ class VimTSCompleteModel(nn.Module):
         super().__init__()
         
         # Module 1: Feature Extraction
-        from backbone import VimTSFeatureExtraction
         self.feature_extractor = VimTSFeatureExtraction(pretrained=True)
         
-        # Module 2: Query Initialization
+        # Module 2: Query Initialization - CORRECTED IMPORT
         from queryInitialization import QueryInitialization
         self.query_initializer = QueryInitialization(
             feature_dim=256,
@@ -38,7 +40,7 @@ class VimTSCompleteModel(nn.Module):
             num_recognition_queries=num_recognition_queries
         )
         
-        # Module 3: Decoder
+        # Module 3: Decoder - CORRECTED IMPORT
         from decoder import CompleteVimTSDecoder
         self.decoder = CompleteVimTSDecoder(
             d_model=256,
@@ -150,60 +152,9 @@ class MinimalVimTSModelWithDecoder(nn.Module):
     def forward(self, images):
         return self.vimts_model(images)
 
-
-# Test function for Module 3
-def test_module3_integration():
-    """Test Module 3 (Decoder) integration"""
-    print("🔍 Testing Module 3: Decoder Integration...")
-    
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"📱 Using device: {device}")
-    
-    # Create test model
-    model = MinimalVimTSModelWithDecoder().to(device)
-    
-    # Test with dummy images
-    batch_size, channels, height, width = 2, 3, 640, 480
-    test_images = torch.randn(batch_size, channels, height, width).to(device)
-    
-    try:
-        with torch.no_grad():
-            predictions = model(test_images)
-        
-        print(f"✅ Forward pass successful!")
-        print(f"   Images shape: {test_images.shape}")
-        print(f"   Pred logits shape: {predictions['pred_logits'].shape}")
-        print(f"   Pred boxes shape: {predictions['pred_boxes'].shape}")
-        print(f"   Pred polygons shape: {predictions['pred_polygons'].shape}")
-        print(f"   Pred texts shape: {predictions['pred_texts'].shape}")
-        
-        # Check Module 2 outputs  
-        if 'coarse_predictions' in predictions:
-            coarse = predictions['coarse_predictions']
-            print(f"   ✅ Module 2 - Coarse class: {coarse['coarse_class_logits'].shape}")
-            print(f"   ✅ Module 2 - Coarse bbox: {coarse['coarse_bbox_pred'].shape}")
-            
-        # Check Module 3 outputs (attention weights)
-        if 'attention_weights' in predictions:
-            attn_weights = predictions['attention_weights']
-            print(f"   ✅ Module 3 - Attention layers: {len(attn_weights)}")
-            print(f"   ✅ Module 3 - Attention shape: {attn_weights[0].shape}")
-            
-        print("✅ Module 3 integration test passed!")
-        return True
-        
-    except Exception as e:
-        print(f"❌ Module 3 integration test failed: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return False
-
-
-import os
-import json
-import cv2
-from PIL import Image
-from torch.utils.data import Dataset
+# ========================================
+# Dataset Loading (Same as before)
+# ========================================
 
 class VimTSRealDataset(Dataset):
     """Dataset loader for COCO-style annotation format"""
@@ -211,48 +162,49 @@ class VimTSRealDataset(Dataset):
         self.dataset_path = dataset_path
         self.split = split
         self.dataset_name = dataset_name
-
+        
         # Paths
         self.annotation_file = os.path.join(dataset_path, dataset_name, f'{split}.json')
         self.image_dir = os.path.join(dataset_path, dataset_name, 'img')
-
+        
         # Load JSON
         with open(self.annotation_file, 'r') as f:
             coco = json.load(f)
-
+        
         # Map image_id → image info
         self.images = {img['id']: img for img in coco['images']}
         self.annotations = coco['annotations']
-
+        
         # Group annotations by image_id
         self.image_to_anns = {}
         for ann in self.annotations:
             self.image_to_anns.setdefault(ann['image_id'], []).append(ann)
-
+        
         self.image_ids = list(self.images.keys())
-
+    
     def __len__(self):
         return len(self.image_ids)
-
+    
     def __getitem__(self, idx):
         image_id = self.image_ids[idx]
         img_info = self.images[image_id]
         ann_list = self.image_to_anns.get(image_id, [])
-
+        
         # Load image
         image_path = os.path.join(self.image_dir, img_info['file_name'])
         image = Image.open(image_path).convert('RGB')
         image = torch.tensor(np.array(image)).permute(2, 0, 1).float() / 255.0
-
+        
         # Parse annotations
         labels, boxes, polygons, texts = [], [], [], []
+        
         for ann in ann_list:
             labels.append(ann.get('category_id', 1))
-
+            
             # Bounding box [x, y, w, h] → [x1, y1, x2, y2]
             x, y, w, h = ann['bbox']
             boxes.append([x, y, x + w, y + h])
-
+            
             # Polygon from segmentation (use first if multiple)
             if 'segmentation' in ann and len(ann['segmentation']) > 0:
                 poly = np.array(ann['segmentation'][0]).reshape(-1, 2)
@@ -262,21 +214,21 @@ class VimTSRealDataset(Dataset):
             else:
                 polygon_flat = np.zeros(16)
             polygons.append(polygon_flat)
-
+            
             # Text tokens (from `rec` if present, else empty)
             text_tokens = ann.get('rec', [])
             text_tokens = self.text_to_tokens(text_tokens)
             texts.append(text_tokens)
-
+        
         target = {
             'labels': torch.tensor(labels, dtype=torch.long),
             'boxes': torch.tensor(boxes, dtype=torch.float),
             'polygons': torch.tensor(polygons, dtype=torch.float),
             'texts': torch.tensor(texts, dtype=torch.long)
         }
-
+        
         return image, target
-
+    
     def text_to_tokens(self, rec_field, max_len=25, vocab_size=100):
         """Convert 'rec' field or string to tokens"""
         if isinstance(rec_field, str):
@@ -288,37 +240,21 @@ class VimTSRealDataset(Dataset):
         
         # Replace 96 (unused/pad in your JSON) with 0
         tokens = [0 if t == 96 else t for t in tokens]
-
         tokens += [0] * (max_len - len(tokens))
         return tokens[:max_len]
 
-
-# Usage for real training
 def create_real_dataloader(dataset_path):
     """Create DataLoader with real VimTS datasets"""
-    
-    # Dataset paths structure:
-    # dataset_path/
-    # ├── totaltext/
-    # │   ├── train_images/
-    # │   ├── test_images/
-    # │   ├── train.json
-    # │   └── test.json
-    # ├── CTW1500/
-    # │   ├── ctwtrain_text_image/
-    # │   ├── ctwtest_text_image/
-    # │   └── annotations/
-    # └── icdar2015/...
     
     train_dataset = VimTSRealDataset(
         dataset_path=dataset_path,
         split='train',
-        dataset_name='sample'  # or 'ctw1500', 'icdar2015'
+        dataset_name='sample'
     )
     
     train_loader = DataLoader(
         train_dataset,
-        batch_size=2,  # Adjust based on GPU memory
+        batch_size=2,
         shuffle=True,
         collate_fn=collate_fn,
         num_workers=4
@@ -326,16 +262,37 @@ def create_real_dataloader(dataset_path):
     
     return train_loader
 
+def collate_fn(batch):
+    images, targets = zip(*batch)
+    
+    # find max height and width
+    max_h = max(img.shape[1] for img in images)
+    max_w = max(img.shape[2] for img in images)
+    
+    padded_images = []
+    for img in images:
+        c, h, w = img.shape
+        padded = torch.zeros((c, max_h, max_w))
+        padded[:, :h, :w] = img
+        padded_images.append(padded)
+    
+    images = torch.stack(padded_images, dim=0)
+    return images, list(targets)
 
-def dry_run_test(dataset_path):
-    """Complete dry run test with Module 1 + Module 2 + Module 7"""
-    print("🚀 Starting VimTS Dry Run Test with Module 2...")
+# ========================================
+# Testing Functions - CORRECTED
+# ========================================
+
+def dry_run_test_with_module3(dataset_path):
+    """Complete dry run test with Modules 1 + 2 + 3 + 7"""
+    print("🚀 Starting VimTS Dry Run Test with Module 3 (Decoder)...")
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"📱 Using device: {device}")
     
-    model = MinimalVimTSModel().to(device)  # Uses corrected VimTSWithQueryInit
-    criterion = VimTSLoss()  # Your corrected loss function
+    # 🔥 FIX: Use correct model class
+    model = MinimalVimTSModelWithDecoder().to(device)
+    criterion = VimTSLoss()
     
     # Use real dataloader
     dataloader = create_real_dataloader(dataset_path)
@@ -357,21 +314,28 @@ def dry_run_test(dataset_path):
             print(f"   Pred polygons shape: {predictions['pred_polygons'].shape}")
             print(f"   Pred texts shape: {predictions['pred_texts'].shape}")
             
-            # Check if coarse predictions exist (from Module 2)
+            # Check Module 2 outputs (coarse predictions)
             if 'coarse_predictions' in predictions:
                 coarse_preds = predictions['coarse_predictions']
-                print(f"   ✅ Coarse class logits: {coarse_preds['coarse_class_logits'].shape}")
-                print(f"   ✅ Coarse bbox pred: {coarse_preds['coarse_bbox_pred'].shape}")
+                print(f"   ✅ Module 2 - Coarse class: {coarse_preds['coarse_class_logits'].shape}")
+                print(f"   ✅ Module 2 - Coarse bbox: {coarse_preds['coarse_bbox_pred'].shape}")
                 print("   ✅ Module 2 (Query Initialization) working!")
+            
+            # Check Module 3 outputs (attention weights) - NEW!
+            if 'attention_weights' in predictions:
+                attn_weights = predictions['attention_weights']
+                print(f"   ✅ Module 3 - Attention layers: {len(attn_weights)}")
+                print(f"   ✅ Module 3 - Attention shape: {attn_weights[0].shape}")
+                print("   ✅ Module 3 (Decoder) working!")
             
             # Test loss computation
             model.train()
             predictions = model(images)
             loss, loss_dict = criterion(predictions, targets)
             
-            print(f"    Loss computation: SUCCESS!")
-            print(f"    Total loss: {loss.item():.4f}")
-            print(f"    Loss breakdown:")
+            print(f"   ✅ Loss computation: SUCCESS!")
+            print(f"   📊 Total loss: {loss.item():.4f}")
+            print(f"   📋 Loss breakdown:")
             for key, value in loss_dict.items():
                 if isinstance(value, torch.Tensor):
                     print(f"       {key}: {value.item():.4f}")
@@ -381,36 +345,21 @@ def dry_run_test(dataset_path):
             import traceback
             traceback.print_exc()
             return False
+        
+        if batch_idx >= 2:  # Test first 3 batches
+            break
     
-    print("\n🎉 Complete test with Module 2 passed!")
+    print("\n🎉 Complete test with Module 3 (Decoder) passed!")
     return True
 
-
-def collate_fn(batch):
-    images, targets = zip(*batch)
-    
-    # find max height and width
-    max_h = max(img.shape[1] for img in images)
-    max_w = max(img.shape[2] for img in images)
-    
-    padded_images = []
-    for img in images:
-        c, h, w = img.shape
-        padded = torch.zeros((c, max_h, max_w))
-        padded[:, :h, :w] = img
-        padded_images.append(padded)
-    
-    images = torch.stack(padded_images, dim=0)
-    return images, list(targets)
-
-
-# Test gradient flow
 def test_gradient_flow():
     """Test if gradients flow properly through the model"""
     print("🔍 Testing gradient flow...")
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model = MinimalVimTSModel().to(device)
+    
+    # 🔥 FIX: Use correct model class
+    model = MinimalVimTSModelWithDecoder().to(device)
     criterion = VimTSLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
     
@@ -455,18 +404,20 @@ def test_gradient_flow():
         traceback.print_exc()
         return False
 
+# ========================================
+# Main Execution - CORRECTED
+# ========================================
+
 if __name__ == "__main__":
     dataset_path = r"/content/drive/MyDrive"  # update this
-    success = dry_run_test(dataset_path)
+    
+    success = dry_run_test_with_module3(dataset_path)
+    
     if success:
         success = test_gradient_flow()
     
     if success:
-        print("\n ALL TESTS PASSED! Your Modules 1 & 7 are working correctly.")
-        print(" Ready to implement Module 2: Query Initialization")
+        print("\n🎉 ALL TESTS PASSED! Your Modules 1+2+3+7 are working correctly!")
+        print("🚀 Ready to implement Module 4: PQGM or Module 5: Task-Aware Adapter")
     else:
-        print("\n Tests failed. Please fix the issues before proceeding.")
-
-
-
-
+        print("\n❌ Tests failed. Please fix the issues before proceeding.")

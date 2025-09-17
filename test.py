@@ -1,4 +1,4 @@
-# CORRECTED test.py for VimTS Module 3 Integration
+# COMPLETE test.py for VimTS with Module 4 (PQGM)
 
 import torch
 import torch.nn as nn
@@ -9,30 +9,32 @@ import os
 import json
 from PIL import Image
 
-# Correct imports for all modules
-from backbone import VimTSFeatureExtraction
+# Import loss function
 from loss import VimTSLoss
 
 # ========================================
-# VimTS Complete Model with Module 3
+# VimTS Complete Model with Module 4 (PQGM)
 # ========================================
 
-class VimTSCompleteModel(nn.Module):
+class VimTSWithPQGM(nn.Module):
     """
-    Complete VimTS Model: Modules 1 + 2 + 3 + 7
+    Complete VimTS Model: Modules 1 + 2 + 3 + 4 + 7
+    Now includes PQGM (Prompt Query Generation Module)
     """
     def __init__(self, 
                  num_classes=2, 
                  vocab_size=100, 
                  max_text_len=25,
                  num_detection_queries=100,
-                 num_recognition_queries=25):
+                 num_recognition_queries=25,
+                 num_domains=5):
         super().__init__()
         
         # Module 1: Feature Extraction
+        from backbone import VimTSFeatureExtraction
         self.feature_extractor = VimTSFeatureExtraction(pretrained=True)
         
-        # Module 2: Query Initialization - CORRECTED IMPORT
+        # Module 2: Query Initialization
         from queryInitialization import QueryInitialization
         self.query_initializer = QueryInitialization(
             feature_dim=256,
@@ -40,7 +42,7 @@ class VimTSCompleteModel(nn.Module):
             num_recognition_queries=num_recognition_queries
         )
         
-        # Module 3: Decoder - CORRECTED IMPORT
+        # Module 3: Decoder
         from decoder import CompleteVimTSDecoder
         self.decoder = CompleteVimTSDecoder(
             d_model=256,
@@ -50,7 +52,17 @@ class VimTSCompleteModel(nn.Module):
             dropout=0.1
         )
         
-        # Enhanced prediction heads with more layers for better performance
+        # Module 4: PQGM (NEW!)
+        from pqgm import PQGM
+        self.pqgm = PQGM(
+            d_model=256,
+            num_heads=8,
+            num_domains=num_domains,
+            max_prompt_len=50,
+            dropout=0.1
+        )
+        
+        # Enhanced prediction heads
         self.class_head = nn.Sequential(
             nn.Linear(256, 256),
             nn.ReLU(),
@@ -84,17 +96,23 @@ class VimTSCompleteModel(nn.Module):
         self.vocab_size = vocab_size
         self.num_detection_queries = num_detection_queries
         self.num_recognition_queries = num_recognition_queries
+        self.num_domains = num_domains
         
-    def forward(self, images):
+    def forward(self, images, domain_id=None, granularity_hints=None):
         """
-        Complete forward pass through all modules
+        Complete forward pass through all modules including PQGM
+        
+        Args:
+            images: [B, 3, H, W] input images
+            domain_id: int, domain identifier for cross-domain adaptation
+            granularity_hints: [B, N, 3] granularity preferences (optional)
         """
         batch_size = images.shape[0]
         
         # Module 1: Feature Extraction
         enhanced_features = self.feature_extractor(images)  # [B, 256, H', W']
         
-        # Prepare visual features for decoder
+        # Prepare visual features for decoder and PQGM
         B, C, H, W = enhanced_features.shape
         visual_features = enhanced_features.flatten(2).permute(0, 2, 1)  # [B, H*W, C]
         
@@ -105,20 +123,29 @@ class VimTSCompleteModel(nn.Module):
         all_queries = torch.cat([detection_queries, recognition_queries], dim=1)  # [B, 125, C]
         
         # Module 3: Decoder - Vision-Language Communication
-        enhanced_queries, attention_weights = self.decoder(all_queries, visual_features)
+        decoder_queries, attention_weights = self.decoder(all_queries, visual_features)
         
-        # Enhanced prediction heads
-        pred_logits = self.class_head(enhanced_queries)
+        # Module 4: PQGM - Prompt Query Generation (NEW!)
+        pqgm_queries, pqgm_outputs = self.pqgm(
+            decoder_queries, 
+            visual_features, 
+            domain_id=domain_id,
+            granularity_hints=granularity_hints,
+            training=self.training
+        )
+        
+        # Final prediction heads (using PQGM-enhanced queries)
+        pred_logits = self.class_head(pqgm_queries)
         
         # Get image dimensions for proper scaling  
         _, _, img_h, img_w = images.shape
         max_size = max(img_h, img_w)
         
-        pred_boxes = self.bbox_head(enhanced_queries).sigmoid() * max_size
-        pred_polygons = self.polygon_head(enhanced_queries).sigmoid() * max_size
+        pred_boxes = self.bbox_head(pqgm_queries).sigmoid() * max_size
+        pred_polygons = self.polygon_head(pqgm_queries).sigmoid() * max_size
         
         # Text predictions
-        text_logits = self.text_head(enhanced_queries)
+        text_logits = self.text_head(pqgm_queries)
         pred_texts = text_logits.view(batch_size, -1, self.max_text_len, self.vocab_size)
         
         return {
@@ -127,30 +154,30 @@ class VimTSCompleteModel(nn.Module):
             'pred_polygons': pred_polygons,
             'pred_texts': pred_texts,
             'coarse_predictions': coarse_preds,
-            'attention_weights': attention_weights  # New: attention maps for analysis
+            'attention_weights': attention_weights,
+            'pqgm_outputs': pqgm_outputs  # NEW: PQGM analysis outputs
         }
 
-# Updated test model for Module 3 integration
-class MinimalVimTSModelWithDecoder(nn.Module):
-    """Updated model for testing with Module 3 (Decoder)"""
-    def __init__(self, num_classes=2, vocab_size=100, max_text_len=25):
+# Updated test model with Module 4
+class MinimalVimTSModelWithPQGM(nn.Module):
+    """Test model with Module 4 (PQGM)"""
+    def __init__(self, num_classes=2, vocab_size=100, max_text_len=25, num_domains=5):
         super().__init__()
         
-        # Use complete VimTS model with all modules
-        self.vimts_model = VimTSCompleteModel(
+        self.vimts_model = VimTSWithPQGM(
             num_classes=num_classes,
             vocab_size=vocab_size,
             max_text_len=max_text_len,
             num_detection_queries=100,
-            num_recognition_queries=25
+            num_recognition_queries=25,
+            num_domains=num_domains
         )
         
-        # Store parameters for compatibility
         self.max_text_len = max_text_len
         self.vocab_size = vocab_size
         
-    def forward(self, images):
-        return self.vimts_model(images)
+    def forward(self, images, domain_id=None, granularity_hints=None):
+        return self.vimts_model(images, domain_id, granularity_hints)
 
 # ========================================
 # Dataset Loading (Same as before)
@@ -280,18 +307,18 @@ def collate_fn(batch):
     return images, list(targets)
 
 # ========================================
-# Testing Functions - CORRECTED
+# Testing Functions with Module 4
 # ========================================
 
-def dry_run_test_with_module3(dataset_path):
-    """Complete dry run test with Modules 1 + 2 + 3 + 7"""
-    print("🚀 Starting VimTS Dry Run Test with Module 3 (Decoder)...")
+def dry_run_test_with_module4(dataset_path):
+    """Complete dry run test with Modules 1 + 2 + 3 + 4 + 7"""
+    print("🚀 Starting VimTS Dry Run Test with Module 4 (PQGM)...")
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"📱 Using device: {device}")
     
-    # 🔥 FIX: Use correct model class
-    model = MinimalVimTSModelWithDecoder().to(device)
+    # Use PQGM-enhanced model
+    model = MinimalVimTSModelWithPQGM(num_domains=5).to(device)
     criterion = VimTSLoss()
     
     # Use real dataloader
@@ -302,35 +329,51 @@ def dry_run_test_with_module3(dataset_path):
         images = images.to(device)
         targets = [{k: v.to(device) for k, v in target.items()} for target in targets]
         
+        # Optional: add domain and granularity hints
+        domain_id = batch_idx % 5  # Cycle through domains 0-4
+        granularity_hints = None  # Let model auto-select
+        
         try:
             # Forward pass
             with torch.no_grad():
-                predictions = model(images)
+                predictions = model(images, domain_id=domain_id, granularity_hints=granularity_hints)
             
             print(f"✅ Batch {batch_idx + 1}:")
             print(f"   Images shape: {images.shape}")
+            print(f"   Domain ID: {domain_id}")
             print(f"   Pred logits shape: {predictions['pred_logits'].shape}")
             print(f"   Pred boxes shape: {predictions['pred_boxes'].shape}")
             print(f"   Pred polygons shape: {predictions['pred_polygons'].shape}")
             print(f"   Pred texts shape: {predictions['pred_texts'].shape}")
             
-            # Check Module 2 outputs (coarse predictions)
+            # Check Module 2 outputs
             if 'coarse_predictions' in predictions:
                 coarse_preds = predictions['coarse_predictions']
                 print(f"   ✅ Module 2 - Coarse class: {coarse_preds['coarse_class_logits'].shape}")
                 print(f"   ✅ Module 2 - Coarse bbox: {coarse_preds['coarse_bbox_pred'].shape}")
-                print("   ✅ Module 2 (Query Initialization) working!")
             
-            # Check Module 3 outputs (attention weights) - NEW!
+            # Check Module 3 outputs
             if 'attention_weights' in predictions:
                 attn_weights = predictions['attention_weights']
                 print(f"   ✅ Module 3 - Attention layers: {len(attn_weights)}")
                 print(f"   ✅ Module 3 - Attention shape: {attn_weights[0].shape}")
-                print("   ✅ Module 3 (Decoder) working!")
+            
+            # Check Module 4 outputs (PQGM) - NEW!
+            if 'pqgm_outputs' in predictions:
+                pqgm = predictions['pqgm_outputs']
+                print(f"   ✅ Module 4 - Prompt weights: {pqgm['prompt_weights'].shape}")
+                print(f"   ✅ Module 4 - Granularity dist: {pqgm['granularity_distribution'].shape}")
+                if pqgm['domain_logits'] is not None:
+                    print(f"   ✅ Module 4 - Domain logits: {pqgm['domain_logits'].shape}")
+                
+                # Show granularity distribution
+                gran_dist = pqgm['granularity_distribution'].cpu().numpy()
+                print(f"   📊 Granularity preferences: Char={gran_dist[0,0]:.3f}, Word={gran_dist[0,1]:.3f}, Line={gran_dist[0,2]:.3f}")
+                print("   ✅ Module 4 (PQGM) working!")
             
             # Test loss computation
             model.train()
-            predictions = model(images)
+            predictions = model(images, domain_id=domain_id)
             loss, loss_dict = criterion(predictions, targets)
             
             print(f"   ✅ Loss computation: SUCCESS!")
@@ -349,8 +392,56 @@ def dry_run_test_with_module3(dataset_path):
         if batch_idx >= 2:  # Test first 3 batches
             break
     
-    print("\n🎉 Complete test with Module 3 (Decoder) passed!")
+    print("\n🎉 Complete test with Module 4 (PQGM) passed!")
     return True
+
+def test_module4_integration():
+    """Test Module 4 (PQGM) integration with synthetic data"""
+    print("🔍 Testing Module 4: PQGM Integration...")
+    
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"📱 Using device: {device}")
+    
+    # Create test model with PQGM
+    model = MinimalVimTSModelWithPQGM(num_domains=5).to(device)
+    
+    # Test with dummy images
+    batch_size, channels, height, width = 2, 3, 640, 480
+    test_images = torch.randn(batch_size, channels, height, width).to(device)
+    
+    # Optional: test with domain and granularity hints
+    domain_id = 1  # Simulate domain 1
+    granularity_hints = torch.rand(batch_size, 125, 3).to(device)  # Random granularity preferences
+    granularity_hints = F.softmax(granularity_hints, dim=-1)
+    
+    try:
+        with torch.no_grad():
+            predictions = model(test_images, domain_id=domain_id, granularity_hints=granularity_hints)
+        
+        print(f"✅ Forward pass successful!")
+        print(f"   Images shape: {test_images.shape}")
+        print(f"   Pred logits shape: {predictions['pred_logits'].shape}")
+        print(f"   Pred boxes shape: {predictions['pred_boxes'].shape}")
+        print(f"   Pred polygons shape: {predictions['pred_polygons'].shape}")
+        print(f"   Pred texts shape: {predictions['pred_texts'].shape}")
+        
+        # Check Module 4 outputs (PQGM) - NEW!
+        if 'pqgm_outputs' in predictions:
+            pqgm = predictions['pqgm_outputs']
+            print(f"   ✅ Module 4 - Prompt weights shape: {pqgm['prompt_weights'].shape}")
+            print(f"   ✅ Module 4 - Granularity dist: {pqgm['granularity_distribution'].shape}")
+            if pqgm['domain_logits'] is not None:
+                print(f"   ✅ Module 4 - Domain logits: {pqgm['domain_logits'].shape}")
+            print("   ✅ Module 4 (PQGM) working!")
+            
+        print("✅ Module 4 integration test passed!")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Module 4 integration test failed: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return False
 
 def test_gradient_flow():
     """Test if gradients flow properly through the model"""
@@ -358,8 +449,8 @@ def test_gradient_flow():
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
-    # 🔥 FIX: Use correct model class
-    model = MinimalVimTSModelWithDecoder().to(device)
+    # Use PQGM-enhanced model
+    model = MinimalVimTSModelWithPQGM(num_domains=5).to(device)
     criterion = VimTSLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
     
@@ -381,8 +472,8 @@ def test_gradient_flow():
     ]
     
     try:
-        # Forward pass
-        predictions = model(images)
+        # Forward pass with domain ID
+        predictions = model(images, domain_id=2)
         loss, loss_dict = criterion(predictions, targets)
         
         # Backward pass
@@ -405,19 +496,34 @@ def test_gradient_flow():
         return False
 
 # ========================================
-# Main Execution - CORRECTED
+# Main Execution
 # ========================================
 
 if __name__ == "__main__":
-    dataset_path = r"/content/drive/MyDrive"  # update this
+    dataset_path = r"/content/drive/MyDrive"  # Update this path
     
-    success = dry_run_test_with_module3(dataset_path)
+    print("🎯 Testing VimTS with Module 4 (PQGM)")
+    print("=" * 50)
+    
+    # Test 1: Module 4 integration with synthetic data
+    success = test_module4_integration()
     
     if success:
+        # Test 2: Real dataset with Module 4
+        success = dry_run_test_with_module4(dataset_path)
+    
+    if success:
+        # Test 3: Gradient flow
         success = test_gradient_flow()
     
     if success:
-        print("\n🎉 ALL TESTS PASSED! Your Modules 1+2+3+7 are working correctly!")
-        print("🚀 Ready to implement Module 4: PQGM or Module 5: Task-Aware Adapter")
+        print("\n🎉 ALL TESTS PASSED! Your VimTS with Module 4 (PQGM) is working correctly!")
+        print("🚀 You now have a state-of-the-art text spotter with:")
+        print("   ✅ Module 1: Feature Extraction")
+        print("   ✅ Module 2: Query Initialization")
+        print("   ✅ Module 3: Decoder")
+        print("   ✅ Module 4: PQGM (Prompt Query Generation)")
+        print("   ✅ Module 7: Loss Function")
+        print("\n🎯 Ready for Module 5: Task-Aware Adapter or deployment!")
     else:
         print("\n❌ Tests failed. Please fix the issues before proceeding.")

@@ -37,7 +37,7 @@ class VimTSWithTaskAdapter(nn.Module):
         self.feature_extractor = VimTSFeatureExtraction(pretrained=True)
         
         # Module 2: Query Initialization
-        from queryInitialization_CORRECTED import QueryInitialization
+        from queryInitialization import QueryInitialization
         self.query_initializer = QueryInitialization(
             feature_dim=256,
             num_detection_queries=num_detection_queries,
@@ -45,7 +45,7 @@ class VimTSWithTaskAdapter(nn.Module):
         )
         
         # Module 3: Decoder
-        from module3_decoder import CompleteVimTSDecoder
+        from decoder import CompleteVimTSDecoder
         self.decoder = CompleteVimTSDecoder(
             d_model=256,
             nhead=8,
@@ -55,7 +55,7 @@ class VimTSWithTaskAdapter(nn.Module):
         )
         
         # Module 4: PQGM
-        from module4_pqgm import PQGM
+        from pqgm import PQGM
         self.pqgm = PQGM(
             d_model=256,
             num_heads=8,
@@ -65,7 +65,7 @@ class VimTSWithTaskAdapter(nn.Module):
         )
         
         # Module 5: Task-Aware Adapter (NEW!)
-        from module5_task_aware_adapter import TaskAwareAdapter
+        from taa import TaskAwareAdapter
         self.task_adapter = TaskAwareAdapter(
             d_model=256,
             num_tasks=num_tasks,
@@ -631,3 +631,4 @@ if __name__ == "__main__":
         print("🚀 Ready for deployment or advanced modules!")
     else:
         print("\n❌ Tests failed. Please fix the issues before proceeding.")
+

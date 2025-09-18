@@ -329,7 +329,7 @@ def main():
     
     # Configuration
     dataset_path = "/content"  # Update this to your dataset path
-    num_epochs = 20
+    num_epochs = 10
     batch_size = 2
     learning_rate = 1e-4
     

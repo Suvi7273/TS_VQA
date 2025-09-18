@@ -328,7 +328,7 @@ def main():
     print("=" * 50)
     
     # Configuration
-    dataset_path = "/content/drive/MyDrive/sample"  # Update this to your dataset path
+    dataset_path = "/content/drive/MyDrive"  # Update this to your dataset path
     num_epochs = 20
     batch_size = 2
     learning_rate = 1e-4

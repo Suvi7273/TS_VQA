@@ -249,11 +249,11 @@ def train_basic_vimts(dataset_path, num_epochs=20, batch_size=2, learning_rate=1
         
         # Save checkpoint every 5 epochs
         if (epoch + 1) % 5 == 0:
-            checkpoint_path = f"checkpoint_epoch_{epoch+1}.pth"
+            checkpoint_path = f"content/checkpoint_epoch_{epoch+1}.pth"
             save_checkpoint(model, optimizer, epoch, avg_loss, checkpoint_path)
     
     # Save final model
-    final_checkpoint_path = "vimts_trained_model.pth"
+    final_checkpoint_path = "content/vimts_trained_model.pth"
     save_checkpoint(model, optimizer, num_epochs-1, train_losses[-1], final_checkpoint_path)
     
     print("\n Training completed!")

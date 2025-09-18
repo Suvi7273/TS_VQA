@@ -126,13 +126,13 @@ class VimTSInference:
             image = Image.open(image_path).convert('RGB')
         else:
             image = image_path  # Already PIL Image
-        
-        # Convert to tensor
-        image_tensor = torch.tensor(np.array(image)).permute(2, 0, 1).float() / 255.0
-        
+    
+        # Convert to tensor and ensure values are float32
+        image_array = np.array(image).astype(np.float32) / 255.0  # Normalize to [0, 1]
+        image_tensor = torch.tensor(image_array).permute(2, 0, 1)  # Change order to [C, H, W]
+    
         # Add batch dimension
         image_tensor = image_tensor.unsqueeze(0).to(self.device)
-        
         return image_tensor, image
     
     def postprocess_predictions(self, predictions, image_size):

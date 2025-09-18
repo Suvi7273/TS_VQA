@@ -369,7 +369,7 @@ def main():
         
         print("\n" + "="*50)
         print(" Testing trained model...")
-        test_trained_model("vimts_trained_model.pth")
+        test_trained_model("/content/vimts_trained_model.pth")
         
     else:
         print(" Invalid choice")

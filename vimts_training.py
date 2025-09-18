@@ -286,7 +286,7 @@ def test_trained_model(model_path, test_image_path=None):
     
     # Load model
     model = MinimalVimTSModel().to(device)
-    checkpoint = torch.load(model_path, map_location=device)
+    checkpoint = torch.load(model_path, map_location=device, weights_only=False)
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
     

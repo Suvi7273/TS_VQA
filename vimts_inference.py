@@ -324,9 +324,9 @@ def main():
     
     # Configuration
     model_path = None  # Path to your trained model checkpoint (or None for random weights)
-    test_image_path = "/content/drive/MyDrive/sample/test/000011.jpg"  # Single image to test
-    test_folder_path = "/content/drive/MyDrive/sample/test"  # Folder with test images
-    output_folder = "/content/drive/MyDrive/inference_results/"  # Where to save visualization results
+    test_image_path = "/content/sample/test/000011.jpg"  # Single image to test
+    test_folder_path = "/content/sample/test"  # Folder with test images
+    output_folder = "/content/inference_results/"  # Where to save visualization results
     
     # Initialize inference engine
     inference = VimTSInference(

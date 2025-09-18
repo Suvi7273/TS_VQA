@@ -139,46 +139,52 @@ class VimTSInference:
         """Convert model predictions to interpretable format"""
         img_w, img_h = image_size
         max_size = max(img_h, img_w)
-        
+    
         # Get predictions
         pred_logits = predictions['pred_logits'][0]  # Remove batch dim
         pred_boxes = predictions['pred_boxes'][0] 
         pred_polygons = predictions['pred_polygons'][0]
         pred_texts = predictions['pred_texts'][0]
-        
+    
         # Apply softmax to get class probabilities
         class_probs = torch.softmax(pred_logits, dim=-1)
-        
+    
         # Get text class probabilities (not background)
         text_scores = class_probs[:, 1]  # Assuming class 1 is text
-        
+    
         # Filter by confidence
         confident_indices = text_scores > self.confidence_threshold
-        
         results = []
+    
         for i in range(len(pred_logits)):
             if confident_indices[i]:
                 # Scale coordinates to image size
                 box = pred_boxes[i] * max_size
+                box = box.cpu().numpy()  # Ensure it is a NumPy array
+    
+                # Validate the bounding box
+                if box[0] >= box[2] or box[1] >= box[3]:
+                    continue  # Skip invalid boxes
+    
                 polygon = pred_polygons[i] * max_size
-                
                 # Convert text predictions to string
                 text_logits = pred_texts[i]  # [max_text_len, vocab_size]
                 text_chars = torch.argmax(text_logits, dim=-1)  # [max_text_len]
-                
+    
                 # Convert to string (simple approach)
                 text = ''.join([chr(min(max(char.item(), 32), 126)) for char in text_chars if char.item() > 0])
                 text = text.strip()
-                
+    
                 result = {
                     'confidence': text_scores[i].item(),
-                    'bbox': box.cpu().numpy(),
+                    'bbox': box,
                     'polygon': polygon.cpu().numpy().reshape(-1, 2),
                     'text': text,
                     'class_probs': class_probs[i].cpu().numpy()
                 }
+    
                 results.append(result)
-        
+
         return results
     
     def predict_single_image(self, image_path):

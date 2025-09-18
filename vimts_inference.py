@@ -256,44 +256,49 @@ class VimTSInference:
     def test_multiple_images(self, image_folder, output_folder=None, limit=None):
         """Test model on multiple images"""
         image_folder = Path(image_folder)
+    
         if output_folder:
             os.makedirs(output_folder, exist_ok=True)
-        
+    
         # Find image files
         image_extensions = ['.jpg', '.jpeg', '.png', '.bmp', '.tiff']
         image_files = []
+    
         for ext in image_extensions:
             image_files.extend(list(image_folder.glob(f'*{ext}')))
             image_files.extend(list(image_folder.glob(f'*{ext.upper()}')))
-        
+    
         if limit:
             image_files = image_files[:limit]
-        
+    
         print(f" Found {len(image_files)} images to test")
-        
+    
         all_results = []
-        
+    
         for i, image_path in enumerate(image_files):
             print(f"\n--- Image {i+1}/{len(image_files)} ---")
-            
+    
             try:
+                # Ensure the path is a string
+                image_path_str = str(image_path)
+    
                 # Run inference
-                results, original_image = self.predict_single_image(image_path)
-                
+                results, original_image = self.predict_single_image(image_path_str)
+    
                 # Visualize and save
                 if output_folder:
                     output_path = os.path.join(output_folder, f"result_{image_path.stem}.png")
                     self.visualize_results(original_image, results, save_path=output_path, show_plot=False)
                 else:
                     self.visualize_results(original_image, results, show_plot=True)
-                
+    
                 # Store results
                 all_results.append({
                     'image_path': str(image_path),
                     'detections': len(results),
                     'results': results
                 })
-                
+    
                 # Print summary
                 if results:
                     print(" Detected texts:")
@@ -301,20 +306,20 @@ class VimTSInference:
                         print(f"   {j+1}. '{result['text']}' (conf: {result['confidence']:.3f})")
                 else:
                     print(" No text detected")
-                
+    
             except Exception as e:
                 print(f" Error processing {image_path}: {str(e)}")
                 continue
-        
+    
         # Summary
         total_detections = sum(r['detections'] for r in all_results)
         avg_detections = total_detections / len(all_results) if all_results else 0
-        
+    
         print(f"\n SUMMARY:")
         print(f"   Images processed: {len(all_results)}")
         print(f"   Total detections: {total_detections}")
         print(f"   Average detections per image: {avg_detections:.1f}")
-        
+    
         return all_results
 
 def main():

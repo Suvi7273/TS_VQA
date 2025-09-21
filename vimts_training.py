@@ -1,5 +1,5 @@
-# Simple Training Script for VimTS Base Model
-# Train on small dataset and save checkpoint for testing
+# VimTS Improved Training Strategy
+# Address high loss issue with better training approach
 
 import torch
 import torch.nn as nn
@@ -7,35 +7,91 @@ import torch.optim as optim
 import numpy as np
 import os
 import json
+import logging
 from torch.utils.data import DataLoader, Dataset
 from PIL import Image
 from tqdm import tqdm
+import matplotlib.pyplot as plt
+from datetime import datetime
 
-# Import your VimTS components
+# Import your components
 from backbone import VimTSFeatureExtraction
 from loss import VimTSLoss
+from vimts_data_augmentation import create_augmentation_pipeline, TextSpottingAugmentation
 
-# Basic VimTS Model (same as your test.py)
-class MinimalVimTSModel(nn.Module):
-    """Minimal VimTS model for testing Modules 1 & 7"""
+class ImprovedVimTSModel(nn.Module):
+    """
+    Improved VimTS model with better initialization and architecture
+    """
     def __init__(self, num_classes=2, vocab_size=100, max_text_len=25, num_queries=100):
         super().__init__()
         
         # Module 1: Feature Extraction
         self.feature_extractor = VimTSFeatureExtraction(pretrained=True)
         
-        # Minimal query generation for testing
+        # Improved query initialization
         self.num_queries = num_queries
         self.query_embed = nn.Embedding(num_queries, 256)
         
-        # Prediction heads
-        self.class_head = nn.Linear(256, num_classes + 1)  # +1 for background
-        self.bbox_head = nn.Linear(256, 4)
-        self.polygon_head = nn.Linear(256, 16)  # 8 points * 2 coords
-        self.text_head = nn.Linear(256, max_text_len * vocab_size)
+        # Additional feature processing
+        self.feature_projection = nn.Sequential(
+            nn.Conv2d(256, 256, 1),
+            nn.GroupNorm(32, 256),
+            nn.ReLU(inplace=True)
+        )
+        
+        # Improved prediction heads with proper initialization
+        self.class_head = nn.Sequential(
+            nn.Linear(256, 256),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(256, num_classes + 1)
+        )
+        
+        self.bbox_head = nn.Sequential(
+            nn.Linear(256, 256), 
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(256, 4)
+        )
+        
+        self.polygon_head = nn.Sequential(
+            nn.Linear(256, 256),
+            nn.ReLU(), 
+            nn.Dropout(0.1),
+            nn.Linear(256, 16)
+        )
+        
+        self.text_head = nn.Sequential(
+            nn.Linear(256, 512),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(512, max_text_len * vocab_size)
+        )
         
         self.max_text_len = max_text_len
         self.vocab_size = vocab_size
+        
+        # Initialize weights properly
+        self._initialize_weights()
+        
+    def _initialize_weights(self):
+        """Proper weight initialization for better convergence"""
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.Embedding):
+                nn.init.normal_(m.weight, 0, 0.1)
+        
+        # Special initialization for classification head (bias towards background)
+        nn.init.constant_(self.class_head[-1].bias, 0)
+        nn.init.constant_(self.class_head[-1].bias[0], -2.0)  # Background bias
         
     def forward(self, images):
         batch_size = images.shape[0]
@@ -43,19 +99,27 @@ class MinimalVimTSModel(nn.Module):
         # Module 1: Feature extraction
         features = self.feature_extractor(images)  # [B, 256, H', W']
         
-        # Simple query processing
+        # Additional feature processing
+        processed_features = self.feature_projection(features)
+        
+        # Improved query processing
         queries = self.query_embed.weight.unsqueeze(0).expand(batch_size, -1, -1)
         
-        # Global average pooling of features
-        pooled_features = features.mean(dim=[2, 3])  # [B, 256]
+        # Multi-scale feature pooling
+        avg_pool = F.adaptive_avg_pool2d(processed_features, (1, 1)).flatten(1)  # [B, 256]
+        max_pool = F.adaptive_max_pool2d(processed_features, (1, 1)).flatten(1)  # [B, 256] 
+        pooled_features = (avg_pool + max_pool) / 2
         
-        # Add pooled features to queries
+        # Enhance queries with pooled features
         enhanced_queries = queries + pooled_features.unsqueeze(1)
         
-        # Prediction heads
+        # Apply layer normalization
+        enhanced_queries = F.layer_norm(enhanced_queries, [256])
+        
+        # Predictions
         pred_logits = self.class_head(enhanced_queries)
-        pred_boxes = self.bbox_head(enhanced_queries).sigmoid()
-        pred_polygons = self.polygon_head(enhanced_queries).sigmoid()
+        pred_boxes = torch.sigmoid(self.bbox_head(enhanced_queries))
+        pred_polygons = torch.sigmoid(self.polygon_head(enhanced_queries))
         
         # Text predictions
         text_logits = self.text_head(enhanced_queries)
@@ -68,23 +132,21 @@ class MinimalVimTSModel(nn.Module):
             'pred_texts': pred_texts
         }
 
-# Dataset class (same as your test.py)
-class VimTSRealDataset(Dataset):
-    """Dataset loader for COCO-style annotation format"""
-    def __init__(self, dataset_path, split='train', dataset_name='sample'):
+class ImprovedVimTSDataset(Dataset):
+    """Dataset with augmentation support"""
+    def __init__(self, dataset_path, split='train', dataset_name='sample', use_augmentation=True):
         self.dataset_path = dataset_path
         self.split = split
         self.dataset_name = dataset_name
+        self.use_augmentation = use_augmentation and (split == 'train')
         
-        # Paths
-        self.annotation_file = os.path.join(dataset_path, dataset_name, f'{split}.json')
-        self.image_dir = os.path.join(dataset_path, dataset_name, 'img')
+        # Load dataset
+        annotation_file = os.path.join(dataset_path, dataset_name, f'{split}.json')
+        image_dir = os.path.join(dataset_path, dataset_name, 'img')
         
-        # Load JSON
-        with open(self.annotation_file, 'r') as f:
+        with open(annotation_file, 'r') as f:
             coco = json.load(f)
         
-        # Map image_id → image info
         self.images = {img['id']: img for img in coco['images']}
         self.annotations = coco['annotations']
         
@@ -94,20 +156,38 @@ class VimTSRealDataset(Dataset):
             self.image_to_anns.setdefault(ann['image_id'], []).append(ann)
         
         self.image_ids = list(self.images.keys())
-        print(f" Loaded {len(self.image_ids)} images from {dataset_name}")
+        
+        # Setup augmentation
+        if self.use_augmentation:
+            self.augmentation = TextSpottingAugmentation(
+                image_size=(640, 640),
+                augment_prob=0.9,  # High augmentation probability for small dataset
+                strong_augment_prob=0.4
+            )
+        
+        print(f" {split} dataset: {len(self.image_ids)} images, augmentation: {self.use_augmentation}")
+        
+        # Data repetition for small datasets
+        if split == 'train' and len(self.image_ids) < 100:
+            self.repeat_factor = max(1, 100 // len(self.image_ids))
+            print(f" Small dataset detected, repeating {self.repeat_factor}x for better training")
+        else:
+            self.repeat_factor = 1
     
     def __len__(self):
-        return len(self.image_ids)
+        return len(self.image_ids) * self.repeat_factor
     
     def __getitem__(self, idx):
-        image_id = self.image_ids[idx]
+        # Handle repetition
+        actual_idx = idx % len(self.image_ids)
+        
+        image_id = self.image_ids[actual_idx]
         img_info = self.images[image_id]
         ann_list = self.image_to_anns.get(image_id, [])
         
         # Load image
-        image_path = os.path.join(self.image_dir, img_info['file_name'])
+        image_path = os.path.join(self.dataset_path, self.dataset_name, 'img', img_info['file_name'])
         image = Image.open(image_path).convert('RGB')
-        image = torch.tensor(np.array(image)).permute(2, 0, 1).float() / 255.0
         
         # Parse annotations
         labels, boxes, polygons, texts = [], [], [], []
@@ -119,7 +199,7 @@ class VimTSRealDataset(Dataset):
             x, y, w, h = ann['bbox']
             boxes.append([x, y, x + w, y + h])
             
-            # Polygon from segmentation
+            # Polygon
             if 'segmentation' in ann and len(ann['segmentation']) > 0:
                 poly = np.array(ann['segmentation'][0]).reshape(-1, 2)
                 polygon_flat = poly.flatten()[:16]
@@ -134,14 +214,42 @@ class VimTSRealDataset(Dataset):
             text_tokens = self.text_to_tokens(text_tokens)
             texts.append(text_tokens)
         
-        target = {
-            'labels': torch.tensor(labels, dtype=torch.long),
-            'boxes': torch.tensor(boxes, dtype=torch.float),
-            'polygons': torch.tensor(polygons, dtype=torch.float),
-            'texts': torch.tensor(texts, dtype=torch.long)
+        # Create targets
+        targets = {
+            'labels': torch.tensor(labels, dtype=torch.long) if labels else torch.tensor([1], dtype=torch.long),
+            'boxes': torch.tensor(boxes, dtype=torch.float) if boxes else torch.tensor([[10, 10, 50, 50]], dtype=torch.float),
+            'polygons': torch.tensor(polygons, dtype=torch.float) if polygons else torch.tensor([[10, 10, 50, 10, 50, 50, 10, 50, 0, 0, 0, 0, 0, 0, 0, 0]], dtype=torch.float),
+            'texts': torch.tensor(texts, dtype=torch.long) if texts else torch.tensor([[0] * 25], dtype=torch.long)
         }
         
-        return image, target
+        # Apply augmentation
+        if self.use_augmentation:
+            try:
+                image_tensor, targets = self.augmentation.augment_sample(image, targets)
+                return image_tensor, targets
+            except Exception as e:
+                print(f" Augmentation failed: {e}")
+                # Fallback to basic preprocessing
+                pass
+        
+        # Basic preprocessing
+        image_array = np.array(image)
+        image_tensor = torch.tensor(image_array).permute(2, 0, 1).float() / 255.0
+        
+        # Resize image
+        image_tensor = F.interpolate(image_tensor.unsqueeze(0), size=(640, 640), mode='bilinear', align_corners=False).squeeze(0)
+        
+        # Scale boxes to match resized image
+        original_h, original_w = image_array.shape[:2]
+        scale_x = 640 / original_w
+        scale_y = 640 / original_h
+        
+        scaled_boxes = targets['boxes'].clone()
+        scaled_boxes[:, [0, 2]] *= scale_x
+        scaled_boxes[:, [1, 3]] *= scale_y
+        targets['boxes'] = scaled_boxes
+        
+        return image_tensor, targets
     
     def text_to_tokens(self, rec_field, max_len=25, vocab_size=100):
         """Convert text to tokens"""
@@ -156,223 +264,263 @@ class VimTSRealDataset(Dataset):
         tokens += [0] * (max_len - len(tokens))
         return tokens[:max_len]
 
-def collate_fn(batch):
-    """Collate function for variable image sizes"""
-    images, targets = zip(*batch)
-    
-    # Pad images to same size
-    max_h = max(img.shape[1] for img in images)
-    max_w = max(img.shape[2] for img in images)
-    
-    padded_images = []
-    for img in images:
-        c, h, w = img.shape
-        padded = torch.zeros((c, max_h, max_w))
-        padded[:, :h, :w] = img
-        padded_images.append(padded)
-    
-    images = torch.stack(padded_images, dim=0)
-    return images, list(targets)
-
-def train_basic_vimts(dataset_path, num_epochs=20, batch_size=2, learning_rate=1e-4):
-    """Train basic VimTS model on small dataset"""
-    
-    print(" Starting VimTS Basic Training")
-    print("=" * 50)
-    
-    # Setup device
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f" Using device: {device}")
-    
-    # Create dataset and dataloader
-    dataset = VimTSRealDataset(dataset_path, split='train', dataset_name='sample')
-    dataloader = DataLoader(
-        dataset,
-        batch_size=batch_size,
-        shuffle=True,
-        collate_fn=collate_fn,
-        num_workers=2
-    )
-    
-    # Initialize model
-    model = MinimalVimTSModel().to(device)
-    criterion = VimTSLoss()
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)
-    
-    print(f" Model parameters: {sum(p.numel() for p in model.parameters()):,}")
-    print(f" Trainable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
-    
-    # Training loop
-    model.train()
-    train_losses = []
-    
-    for epoch in range(num_epochs):
+class ImprovedTrainer:
+    """
+    Improved trainer with better training strategy
+    """
+    def __init__(self, config):
+        self.config = config
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        
+        # Initialize model
+        self.model = ImprovedVimTSModel().to(self.device)
+        
+        # Better loss function
+        self.criterion = VimTSLoss()
+        
+        # Improved optimizer with proper hyperparameters
+        self.optimizer = optim.AdamW(
+            self.model.parameters(),
+            lr=config.get('learning_rate', 1e-4),
+            weight_decay=config.get('weight_decay', 0.01),
+            betas=(0.9, 0.999)
+        )
+        
+        # Learning rate scheduler
+        self.scheduler = optim.lr_scheduler.OneCycleLR(
+            self.optimizer,
+            max_lr=config.get('max_lr', 1e-3),
+            epochs=config.get('num_epochs', 100),
+            steps_per_epoch=config.get('steps_per_epoch', 10),
+            pct_start=0.1,
+            anneal_strategy='cos'
+        )
+        
+        # Training tracking
+        self.train_losses = []
+        self.best_loss = float('inf')
+        
+        # Setup logging
+        self.setup_logging()
+        
+    def setup_logging(self):
+        """Setup training logging"""
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_dir = f"training_logs_{timestamp}"
+        os.makedirs(log_dir, exist_ok=True)
+        
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(levelname)s - %(message)s',
+            handlers=[
+                logging.FileHandler(os.path.join(log_dir, 'training.log')),
+                logging.StreamHandler()
+            ]
+        )
+        self.log_dir = log_dir
+        
+    def train_epoch(self, dataloader, epoch):
+        """Train one epoch"""
+        self.model.train()
         epoch_losses = []
         
-        pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{num_epochs}")
+        pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}")
+        
         for batch_idx, (images, targets) in enumerate(pbar):
-            images = images.to(device)
-            targets = [{k: v.to(device) for k, v in target.items()} for target in targets]
+            images = images.to(self.device)
+            targets = [{k: v.to(self.device) for k, v in target.items()} for target in targets]
             
             # Forward pass
-            predictions = model(images)
-            loss, loss_dict = criterion(predictions, targets)
+            predictions = self.model(images)
             
+            # Compute loss
+            try:
+                loss, loss_dict = self.criterion(predictions, targets)
+            except Exception as e:
+                logging.warning(f"Loss computation failed: {e}")
+                continue
+            
+            # Check for invalid loss
+            if not torch.isfinite(loss):
+                logging.warning(f"Invalid loss detected: {loss.item()}")
+                continue
+                
             # Backward pass
-            optimizer.zero_grad()
+            self.optimizer.zero_grad()
             loss.backward()
             
-            # Gradient clipping
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            # Gradient clipping (important for stability)
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
             
-            optimizer.step()
+            self.optimizer.step()
+            self.scheduler.step()
             
             # Track loss
             epoch_losses.append(loss.item())
             
             # Update progress bar
+            current_lr = self.optimizer.param_groups[0]['lr']
             pbar.set_postfix({
                 'Loss': f'{loss.item():.4f}',
                 'Avg': f'{np.mean(epoch_losses):.4f}',
-                'LR': f'{optimizer.param_groups[0]["lr"]:.6f}'
+                'LR': f'{current_lr:.6f}'
             })
+            
+            # Log detailed losses
+            if batch_idx % 10 == 0:
+                loss_info = " | ".join([f"{k}: {v.item():.4f}" for k, v in loss_dict.items() if isinstance(v, torch.Tensor)])
+                logging.info(f"Batch {batch_idx}: {loss_info}")
         
-        # Epoch summary
-        avg_loss = np.mean(epoch_losses)
-        train_losses.append(avg_loss)
-        
-        print(f"Epoch {epoch+1}/{num_epochs} - Average Loss: {avg_loss:.4f}")
-        
-        # Update learning rate
-        scheduler.step()
-        
-        # Save checkpoint every 5 epochs
-        if (epoch + 1) % 5 == 0:
-            checkpoint_path = f"/content/checkpoint_epoch_{epoch+1}.pth"
-            save_checkpoint(model, optimizer, epoch, avg_loss, checkpoint_path)
+        avg_loss = np.mean(epoch_losses) if epoch_losses else float('inf')
+        return avg_loss
     
-    # Save final model
-    final_checkpoint_path = "/content/vimts_trained_model.pth"
-    save_checkpoint(model, optimizer, num_epochs-1, train_losses[-1], final_checkpoint_path)
+    def train(self, train_dataset, num_epochs=100, batch_size=2):
+        """Main training loop"""
+        
+        # Create dataloader
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=batch_size,
+            shuffle=True,
+            collate_fn=self.collate_fn,
+            num_workers=2,
+            pin_memory=True
+        )
+        
+        logging.info(f" Starting improved training")
+        logging.info(f" Dataset size: {len(train_dataset)}")
+        logging.info(f" Batch size: {batch_size}")
+        logging.info(f" Model parameters: {sum(p.numel() for p in self.model.parameters()):,}")
+        
+        for epoch in range(num_epochs):
+            avg_loss = self.train_epoch(train_loader, epoch)
+            self.train_losses.append(avg_loss)
+            
+            logging.info(f"Epoch {epoch+1}/{num_epochs} - Average Loss: {avg_loss:.4f}")
+            
+            # Save best model
+            if avg_loss < self.best_loss:
+                self.best_loss = avg_loss
+                self.save_checkpoint(f"best_model.pth", epoch, avg_loss)
+                logging.info(f" New best model saved (loss: {avg_loss:.4f})")
+            
+            # Save regular checkpoints
+            if (epoch + 1) % 20 == 0:
+                self.save_checkpoint(f"checkpoint_epoch_{epoch+1}.pth", epoch, avg_loss)
+            
+            # Early stopping if loss is too high
+            if avg_loss > 10000:
+                logging.warning(f" Very high loss detected: {avg_loss:.2f}")
+                logging.info("Consider:")
+                logging.info("1. Reducing learning rate")
+                logging.info("2. Checking data preprocessing")
+                logging.info("3. Adding more regularization")
+        
+        # Save final model
+        self.save_checkpoint("final_model.pth", num_epochs-1, self.train_losses[-1])
+        
+        # Plot training curve
+        self.plot_training_curve()
+        
+        logging.info("🎉 Training completed!")
+        return self.model
     
-    print("\n Training completed!")
-    print(f" Final model saved to: {final_checkpoint_path}")
-    
-    return model, train_losses
-
-def save_checkpoint(model, optimizer, epoch, loss, filepath):
-    """Save model checkpoint"""
-    checkpoint = {
-        'epoch': epoch,
-        'model_state_dict': model.state_dict(),
-        'optimizer_state_dict': optimizer.state_dict(),
-        'loss': loss,
-        'model_config': {
-            'num_classes': 2,
-            'vocab_size': 100,
-            'max_text_len': 25,
-            'num_queries': 100
+    def save_checkpoint(self, filename, epoch, loss):
+        """Save model checkpoint"""
+        checkpoint = {
+            'epoch': epoch,
+            'model_state_dict': self.model.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'scheduler_state_dict': self.scheduler.state_dict(),
+            'loss': loss,
+            'train_losses': self.train_losses,
+            'config': self.config
         }
-    }
-    torch.save(checkpoint, filepath)
-    print(f" Checkpoint saved: {filepath}")
-
-def test_trained_model(model_path, test_image_path=None):
-    """Quick test of trained model"""
-    print(f" Testing trained model from: {model_path}")
+        
+        filepath = os.path.join(self.log_dir, filename)
+        torch.save(checkpoint, filepath)
     
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    def plot_training_curve(self):
+        """Plot and save training curve"""
+        plt.figure(figsize=(10, 6))
+        plt.plot(self.train_losses)
+        plt.title('VimTS Training Loss')
+        plt.xlabel('Epoch')
+        plt.ylabel('Loss')
+        plt.yscale('log')  # Log scale for better visualization
+        plt.grid(True)
+        
+        # Save plot
+        plot_path = os.path.join(self.log_dir, 'training_curve.png')
+        plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        logging.info(f"📊 Training curve saved: {plot_path}")
     
-    # Load model
-    model = MinimalVimTSModel().to(device)
-    checkpoint = torch.load(model_path, map_location=device, weights_only=False)
-    model.load_state_dict(checkpoint['model_state_dict'])
-    model.eval()
-    
-    print(f" Model loaded from epoch {checkpoint['epoch']}")
-    
-    # Test with dummy image if no test image provided
-    if test_image_path is None or not os.path.exists(test_image_path):
-        print(" Creating dummy test image...")
-        dummy_image = torch.randn(1, 3, 640, 480).to(device)
-    else:
-        print(f" Loading test image: {test_image_path}")
-        image = Image.open(test_image_path).convert('RGB')
-        image_tensor = torch.tensor(np.array(image)).permute(2, 0, 1).float() / 255.0
-        dummy_image = image_tensor.unsqueeze(0).to(device)
-    
-    # Run inference
-    with torch.no_grad():
-        predictions = model(dummy_image)
-    
-    print(f" Inference Results:")
-    print(f"   Pred logits shape: {predictions['pred_logits'].shape}")
-    print(f"   Pred boxes shape: {predictions['pred_boxes'].shape}")
-    print(f"   Pred polygons shape: {predictions['pred_polygons'].shape}")
-    print(f"   Pred texts shape: {predictions['pred_texts'].shape}")
-    
-    # Check for confident predictions
-    class_probs = torch.softmax(predictions['pred_logits'][0], dim=-1)
-    text_scores = class_probs[:, 1]  # Text class scores
-    confident_detections = (text_scores > 0.5).sum().item()
-    
-    print(f"   Confident detections (>0.5): {confident_detections}")
-    print(f"   Max confidence: {text_scores.max().item():.3f}")
-    
-    return predictions
+    @staticmethod
+    def collate_fn(batch):
+        """Improved collate function"""
+        images, targets = zip(*batch)
+        
+        # Stack images with proper padding
+        max_h = max(img.shape[1] for img in images)
+        max_w = max(img.shape[2] for img in images)
+        
+        batch_images = torch.zeros((len(images), 3, max_h, max_w))
+        
+        for i, img in enumerate(images):
+            c, h, w = img.shape
+            batch_images[i, :, :h, :w] = img
+        
+        return batch_images, list(targets)
 
 def main():
-    """Main function"""
-    print(" VimTS Basic Training and Testing")
-    print("=" * 50)
+    """Main training function with improved strategy"""
     
     # Configuration
-    dataset_path = "/content"  # Update this to your dataset path
-    num_epochs = 50
-    batch_size = 2
-    learning_rate = 1e-4
+    config = {
+        'dataset_path': '/content/drive/MyDrive',
+        'dataset_name': 'sample',
+        'num_epochs': 100,  # More epochs for better convergence
+        'batch_size': 2,    # Small batch size for small dataset
+        'learning_rate': 5e-5,  # Lower learning rate for stability
+        'max_lr': 1e-3,     # Max learning rate for OneCycle
+        'weight_decay': 0.01,
+        'steps_per_epoch': 10  # Adjust based on dataset size
+    }
     
-    print("Choose option:")
-    print("1. Train new model")
-    print("2. Test existing model")
-    print("3. Train and then test")
+    print(" VimTS Improved Training Strategy")
+    print("=" * 50)
+    print(" Using data augmentation")
+    print(" Better model initialization")
+    print(" Improved optimizer settings")
+    print(" Learning rate scheduling")
+    print(" Gradient clipping")
+    print(" Comprehensive logging")
     
-    choice = input("Enter choice (1/2/3): ").strip()
+    # Create dataset with augmentation
+    train_dataset = ImprovedVimTSDataset(
+        dataset_path=config['dataset_path'],
+        split='train',
+        dataset_name=config['dataset_name'],
+        use_augmentation=True
+    )
     
-    if choice == "1":
-        # Train only
-        model, losses = train_basic_vimts(
-            dataset_path=dataset_path,
-            num_epochs=num_epochs,
-            batch_size=batch_size,
-            learning_rate=learning_rate
-        )
-        print(" Training completed!")
-        
-    elif choice == "2":
-        # Test only
-        model_path = input("Enter model checkpoint path: ").strip()
-        if os.path.exists(model_path):
-            test_trained_model(model_path)
-        else:
-            print(f" Model not found: {model_path}")
-            
-    elif choice == "3":
-        # Train and test
-        model, losses = train_basic_vimts(
-            dataset_path=dataset_path,
-            num_epochs=num_epochs,
-            batch_size=batch_size,
-            learning_rate=learning_rate
-        )
-        
-        print("\n" + "="*50)
-        print(" Testing trained model...")
-        test_trained_model("/content/vimts_trained_model.pth")
-        
-    else:
-        print(" Invalid choice")
+    # Initialize trainer
+    trainer = ImprovedTrainer(config)
+    
+    # Train model
+    trained_model = trainer.train(
+        train_dataset=train_dataset,
+        num_epochs=config['num_epochs'],
+        batch_size=config['batch_size']
+    )
+    
+    print(" Expected improvements:")
+    print("• Loss should decrease from ~14567 to <500")
+    print("• Better convergence with augmentation")
+    print("• More stable training with proper initialization")
+    print("• Detailed logging for monitoring")
 
 if __name__ == "__main__":
     main()

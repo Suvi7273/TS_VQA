@@ -18,7 +18,7 @@ from datetime import datetime
 # Import your components
 from backbone import VimTSFeatureExtraction
 from loss import VimTSLoss
-from data_augmentation import TextSpottingAugmentationFixed
+from data_augmentation import TextSpottingAugmentation
 
 class FixedImprovedVimTSModel(nn.Module):
     """

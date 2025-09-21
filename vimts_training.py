@@ -422,7 +422,7 @@ class ImprovedTrainer:
         # Plot training curve
         self.plot_training_curve()
         
-        logging.info("🎉 Training completed!")
+        logging.info(" Training completed!")
         return self.model
     
     def save_checkpoint(self, filename, epoch, loss):
@@ -455,7 +455,7 @@ class ImprovedTrainer:
         plt.savefig(plot_path, dpi=300, bbox_inches='tight')
         plt.close()
         
-        logging.info(f"📊 Training curve saved: {plot_path}")
+        logging.info(f" Training curve saved: {plot_path}")
     
     @staticmethod
     def collate_fn(batch):
@@ -475,8 +475,6 @@ class ImprovedTrainer:
         return batch_images, list(targets)
 
 def main():
-    """Main training function with improved strategy"""
-    
     # Configuration
     config = {
         'dataset_path': '/content/drive/MyDrive',
@@ -515,12 +513,6 @@ def main():
         num_epochs=config['num_epochs'],
         batch_size=config['batch_size']
     )
-    
-    print(" Expected improvements:")
-    print("• Loss should decrease from ~14567 to <500")
-    print("• Better convergence with augmentation")
-    print("• More stable training with proper initialization")
-    print("• Detailed logging for monitoring")
 
 if __name__ == "__main__":
     main()

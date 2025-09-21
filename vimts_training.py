@@ -17,7 +17,7 @@ from datetime import datetime
 # Import your components
 from backbone import VimTSFeatureExtraction
 from loss import VimTSLoss
-from vimts_data_augmentation import create_augmentation_pipeline, TextSpottingAugmentation
+from data_augmentation import create_augmentation_pipeline, TextSpottingAugmentation
 
 class ImprovedVimTSModel(nn.Module):
     """

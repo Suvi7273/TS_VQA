@@ -477,7 +477,7 @@ class ImprovedTrainer:
 def main():
     # Configuration
     config = {
-        'dataset_path': '/content/drive/MyDrive',
+        'dataset_path': '/content',
         'dataset_name': 'sample',
         'num_epochs': 100,  # More epochs for better convergence
         'batch_size': 2,    # Small batch size for small dataset
@@ -488,13 +488,6 @@ def main():
     }
     
     print(" VimTS Improved Training Strategy")
-    print("=" * 50)
-    print(" Using data augmentation")
-    print(" Better model initialization")
-    print(" Improved optimizer settings")
-    print(" Learning rate scheduling")
-    print(" Gradient clipping")
-    print(" Comprehensive logging")
     
     # Create dataset with augmentation
     train_dataset = ImprovedVimTSDataset(

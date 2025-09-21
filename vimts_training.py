@@ -160,7 +160,7 @@ class FixedImprovedVimTSDataset(Dataset):
         
         # Setup FIXED augmentation
         if self.use_augmentation:
-            self.augmentation = TextSpottingAugmentationFixed(
+            self.augmentation = TextSpottingAugmentation(
                 image_size=(640, 640),
                 augment_prob=0.7,  # Reduced probability to avoid errors
                 strong_augment_prob=0.2

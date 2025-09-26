@@ -185,7 +185,7 @@ def train_basic_vimts(dataset_path, num_epochs=20, batch_size=2, learning_rate=1
     print(f" Using device: {device}")
     
     # Create dataset and dataloader
-    dataset = VimTSRealDataset(dataset_path, split='train', dataset_name='sample')
+    dataset = VimTSRealDataset(dataset_path, split='train', dataset_name='totaltext')
     dataloader = DataLoader(
         dataset,
         batch_size=batch_size,
@@ -249,11 +249,11 @@ def train_basic_vimts(dataset_path, num_epochs=20, batch_size=2, learning_rate=1
         
         # Save checkpoint every 5 epochs
         if (epoch + 1) % 5 == 0:
-            checkpoint_path = f"/content/checkpoint_epoch_{epoch+1}.pth"
+            checkpoint_path = f"/content/drive/my-drive/checkpoint_epoch_{epoch+1}.pth"
             save_checkpoint(model, optimizer, epoch, avg_loss, checkpoint_path)
     
     # Save final model
-    final_checkpoint_path = "/content/vimts_trained_model.pth"
+    final_checkpoint_path = "/content/drive/my-drive/vimts_trained_model.pth"
     save_checkpoint(model, optimizer, num_epochs-1, train_losses[-1], final_checkpoint_path)
     
     print("\n Training completed!")
@@ -328,7 +328,7 @@ def main():
     print("=" * 50)
     
     # Configuration
-    dataset_path = "/content"  # Update this to your dataset path
+    dataset_path = "/content/drive/my-drive"  # Update this to your dataset path
     num_epochs = 10
     batch_size = 2
     learning_rate = 1e-4

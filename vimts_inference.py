@@ -126,65 +126,59 @@ class VimTSInference:
             image = Image.open(image_path).convert('RGB')
         else:
             image = image_path  # Already PIL Image
-    
-        # Convert to tensor and ensure values are float32
-        image_array = np.array(image).astype(np.float32) / 255.0  # Normalize to [0, 1]
-        image_tensor = torch.tensor(image_array).permute(2, 0, 1)  # Change order to [C, H, W]
-    
+        
+        # Convert to tensor
+        image_tensor = torch.tensor(np.array(image)).permute(2, 0, 1).float() / 255.0
+        
         # Add batch dimension
         image_tensor = image_tensor.unsqueeze(0).to(self.device)
+        
         return image_tensor, image
     
     def postprocess_predictions(self, predictions, image_size):
         """Convert model predictions to interpretable format"""
         img_w, img_h = image_size
         max_size = max(img_h, img_w)
-    
+        
         # Get predictions
         pred_logits = predictions['pred_logits'][0]  # Remove batch dim
         pred_boxes = predictions['pred_boxes'][0] 
         pred_polygons = predictions['pred_polygons'][0]
         pred_texts = predictions['pred_texts'][0]
-    
+        
         # Apply softmax to get class probabilities
         class_probs = torch.softmax(pred_logits, dim=-1)
-    
+        
         # Get text class probabilities (not background)
         text_scores = class_probs[:, 1]  # Assuming class 1 is text
-    
+        
         # Filter by confidence
         confident_indices = text_scores > self.confidence_threshold
+        
         results = []
-    
         for i in range(len(pred_logits)):
             if confident_indices[i]:
                 # Scale coordinates to image size
                 box = pred_boxes[i] * max_size
-                box = box.cpu().numpy()  # Ensure it is a NumPy array
-    
-                # Validate the bounding box
-                if box[0] >= box[2] or box[1] >= box[3]:
-                    continue  # Skip invalid boxes
-    
                 polygon = pred_polygons[i] * max_size
+                
                 # Convert text predictions to string
                 text_logits = pred_texts[i]  # [max_text_len, vocab_size]
                 text_chars = torch.argmax(text_logits, dim=-1)  # [max_text_len]
-    
+                
                 # Convert to string (simple approach)
                 text = ''.join([chr(min(max(char.item(), 32), 126)) for char in text_chars if char.item() > 0])
                 text = text.strip()
-    
+                
                 result = {
                     'confidence': text_scores[i].item(),
-                    'bbox': box,
+                    'bbox': box.cpu().numpy(),
                     'polygon': polygon.cpu().numpy().reshape(-1, 2),
                     'text': text,
                     'class_probs': class_probs[i].cpu().numpy()
                 }
-    
                 results.append(result)
-
+        
         return results
     
     def predict_single_image(self, image_path):
@@ -262,49 +256,44 @@ class VimTSInference:
     def test_multiple_images(self, image_folder, output_folder=None, limit=None):
         """Test model on multiple images"""
         image_folder = Path(image_folder)
-    
         if output_folder:
             os.makedirs(output_folder, exist_ok=True)
-    
+        
         # Find image files
         image_extensions = ['.jpg', '.jpeg', '.png', '.bmp', '.tiff']
         image_files = []
-    
         for ext in image_extensions:
             image_files.extend(list(image_folder.glob(f'*{ext}')))
             image_files.extend(list(image_folder.glob(f'*{ext.upper()}')))
-    
+        
         if limit:
             image_files = image_files[:limit]
-    
+        
         print(f" Found {len(image_files)} images to test")
-    
+        
         all_results = []
-    
+        
         for i, image_path in enumerate(image_files):
             print(f"\n--- Image {i+1}/{len(image_files)} ---")
-    
+            
             try:
-                # Ensure the path is a string
-                image_path_str = str(image_path)
-    
                 # Run inference
-                results, original_image = self.predict_single_image(image_path_str)
-    
+                results, original_image = self.predict_single_image(image_path)
+                
                 # Visualize and save
                 if output_folder:
                     output_path = os.path.join(output_folder, f"result_{image_path.stem}.png")
                     self.visualize_results(original_image, results, save_path=output_path, show_plot=False)
                 else:
                     self.visualize_results(original_image, results, show_plot=True)
-    
+                
                 # Store results
                 all_results.append({
                     'image_path': str(image_path),
                     'detections': len(results),
                     'results': results
                 })
-    
+                
                 # Print summary
                 if results:
                     print(" Detected texts:")
@@ -312,20 +301,20 @@ class VimTSInference:
                         print(f"   {j+1}. '{result['text']}' (conf: {result['confidence']:.3f})")
                 else:
                     print(" No text detected")
-    
+                
             except Exception as e:
                 print(f" Error processing {image_path}: {str(e)}")
                 continue
-    
+        
         # Summary
         total_detections = sum(r['detections'] for r in all_results)
         avg_detections = total_detections / len(all_results) if all_results else 0
-    
+        
         print(f"\n SUMMARY:")
         print(f"   Images processed: {len(all_results)}")
         print(f"   Total detections: {total_detections}")
         print(f"   Average detections per image: {avg_detections:.1f}")
-    
+        
         return all_results
 
 def main():

@@ -68,6 +68,8 @@ class MinimalVimTSModel(nn.Module):
             'pred_texts': pred_texts
         }
 
+from torchvision import transforms
+
 # Dataset class (same as your test.py)
 class VimTSRealDataset(Dataset):
     """Dataset loader for COCO-style annotation format"""
@@ -75,6 +77,10 @@ class VimTSRealDataset(Dataset):
         self.dataset_path = dataset_path
         self.split = split
         self.dataset_name = dataset_name
+        self.transform = transforms.Compose([
+            transforms.Resize((512, 512)),  # downscale!
+            transforms.ToTensor()
+        ])
         
         # Paths
         self.annotation_file = os.path.join(dataset_path, dataset_name, f'{split}.json')
@@ -156,23 +162,29 @@ class VimTSRealDataset(Dataset):
         tokens += [0] * (max_len - len(tokens))
         return tokens[:max_len]
 
+# def collate_fn(batch):
+#     """Collate function for variable image sizes"""
+#     images, targets = zip(*batch)
+    
+#     # Pad images to same size
+#     max_h = max(img.shape[1] for img in images)
+#     max_w = max(img.shape[2] for img in images)
+    
+#     padded_images = []
+#     for img in images:
+#         c, h, w = img.shape
+#         padded = torch.zeros((c, max_h, max_w))
+#         padded[:, :h, :w] = img
+#         padded_images.append(padded)
+    
+#     images = torch.stack(padded_images, dim=0)
+#     return images, list(targets)
+
 def collate_fn(batch):
-    """Collate function for variable image sizes"""
     images, targets = zip(*batch)
-    
-    # Pad images to same size
-    max_h = max(img.shape[1] for img in images)
-    max_w = max(img.shape[2] for img in images)
-    
-    padded_images = []
-    for img in images:
-        c, h, w = img.shape
-        padded = torch.zeros((c, max_h, max_w))
-        padded[:, :h, :w] = img
-        padded_images.append(padded)
-    
-    images = torch.stack(padded_images, dim=0)
+    images = torch.stack(images, dim=0)  # no padding needed if all resized
     return images, list(targets)
+
 
 def train_basic_vimts(dataset_path, num_epochs=20, batch_size=2, learning_rate=1e-4):
     """Train basic VimTS model on small dataset"""

@@ -330,7 +330,7 @@ def main():
     # Configuration
     dataset_path = "/content/drive/MyDrive/totaltext"  # Update this to your dataset path
     num_epochs = 10
-    batch_size = 2
+    batch_size = 1
     learning_rate = 1e-4
     
     print("Choose option:")

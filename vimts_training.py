@@ -78,7 +78,7 @@ class VimTSRealDataset(Dataset):
         
         # Paths
         self.annotation_file = os.path.join(dataset_path, dataset_name, f'{split}.json')
-        self.image_dir = os.path.join(dataset_path, dataset_name, 'img')
+        self.image_dir = os.path.join(dataset_path, dataset_name, 'train_images')
         
         # Load JSON
         with open(self.annotation_file, 'r') as f:
@@ -328,7 +328,7 @@ def main():
     print("=" * 50)
     
     # Configuration
-    dataset_path = "/content/drive/my-drive"  # Update this to your dataset path
+    dataset_path = "/content/drive/my-drive/totaltext"  # Update this to your dataset path
     num_epochs = 10
     batch_size = 2
     learning_rate = 1e-4
